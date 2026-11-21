@@ -49,7 +49,9 @@ def main():
         return
 
     msg = build_alert_message(novos.to_dict("records"), "Novas Reversões")
-    if send_telegram(msg, TOKEN, CHAT_ID):
+    print(f"TELEGRAM_TOKEN definido: {bool(TOKEN.strip())} | "
+          f"TELEGRAM_CHAT_ID definido: {bool(CHAT_ID.strip())}")
+    if send_telegram(msg, TOKEN, CHAT_ID, verbose=True):
         print("Alerta enviado.")
     else:
         print("Falha ao enviar alerta (confira os segredos).")

@@ -13,9 +13,9 @@ TICKERS = [
     "B3SA3.SA", "WEGE3.SA", "ABEV3.SA", "ITSA4.SA", "RENT3.SA", "EQTL3.SA",
     "PRIO3.SA", "SUZB3.SA", "RADL3.SA", "LREN3.SA", "BBSE3.SA", "GGBR4.SA",
     "RAIL3.SA", "VIVT3.SA", "CSAN3.SA", "ENEV3.SA", "CMIG4.SA", "TOTS3.SA",
-    "HAPV3.SA", "EMBR3.SA", "CSNA3.SA", "UGPA3.SA", "BRFS3.SA", "JBSS3.SA",
+    "HAPV3.SA", "EMBJ3.SA", "CSNA3.SA", "UGPA3.SA", "MBRF3.SA",
     "KLBN11.SA", "SANB11.SA", "BPAC11.SA", "MULT3.SA", "CYRE3.SA", "ENGI11.SA",
-    "CPLE6.SA", "ELET3.SA", "SBSP3.SA", "CCRO3.SA", "TIMS3.SA", "FLRY3.SA",
+    "CPLE3.SA", "SBSP3.SA", "MOTV3.SA", "TIMS3.SA", "FLRY3.SA",
     "HYPE3.SA", "MGLU3.SA", "ASAI3.SA", "AXIA3.SA", "VBBR3.SA", "RDOR3.SA",
     "CSMG3.SA", "ALOS3.SA", "DIRR3.SA", "CURY3.SA", "PSSA3.SA", "BRAP4.SA",
     "USIM5.SA", "CMIN3.SA", "GOAU4.SA", "MRVE3.SA", "EZTC3.SA", "IGTI11.SA"
@@ -35,18 +35,30 @@ PTS_ETAPA = {0: 0, 1: 1, 2: 2, 3: 4}
 
 
 # ==================== TELEGRAM ====================
-def send_telegram(message: str, token: str, chat_id: str) -> bool:
+def send_telegram(message: str, token: str, chat_id: str, verbose: bool = False) -> bool:
+    """Envia mensagem ao Telegram. Com verbose=True imprime o motivo da falha
+    (a resposta do Telegram nunca contém o token)."""
+    # Limpa espaços, quebras de linha e aspas coladas por engano junto com o segredo.
+    token = (token or "").strip().strip("\"'")
+    chat_id = str(chat_id or "").strip().strip("\"'")
     if not token or not chat_id:
+        if verbose:
+            print("Telegram: TELEGRAM_TOKEN ou TELEGRAM_CHAT_ID está vazio "
+                  "(confira o nome e o tipo do segredo no GitHub).")
         return False
     try:
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         r = requests.post(
             url,
-            data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+            data={"chat_id": chat_id, "text": message[:4000], "parse_mode": "HTML"},
             timeout=10,
         )
+        if not r.ok and verbose:
+            print(f"Telegram respondeu {r.status_code}: {r.text}")
         return r.ok
-    except Exception:
+    except Exception as e:
+        if verbose:
+            print(f"Telegram: erro de conexão ({type(e).__name__})")
         return False
 
 
