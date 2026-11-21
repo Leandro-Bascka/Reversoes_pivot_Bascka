@@ -1,5 +1,6 @@
 """Lógica do B3 Pivot Scanner (sem dependência de Streamlit).
 Usada pelo app (app.py) e pelo job automático de alertas (alert_job.py)."""
+import time
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -272,32 +273,61 @@ def rank_by_liquidity(tickers, top_n=30, min_vol=0.0):
     try:
         data = yf.download(
             tickers, period="3mo", progress=False, auto_adjust=True,
-            group_by="ticker", threads=True,
+            group_by="ticker", threads=True, timeout=30,
         )
     except Exception:
-        return []
+        data = None
+
+    def liquidez(d):
+        if isinstance(d.columns, pd.MultiIndex):
+            d = d.copy()
+            d.columns = d.columns.get_level_values(0)
+        d = d.dropna()
+        return float((d["Volume"] * d["Close"]).tail(20).mean())
 
     rows = []
     for t in tickers:
         try:
-            d = data[t].dropna()
-            vf = float((d["Volume"] * d["Close"]).tail(20).mean())
-            if vf >= min_vol:
-                rows.append((t, vf))
+            vf = liquidez(data[t])
         except Exception:
-            continue
+            vf = None
+        # Se o ativo falhou no download em lote (ex.: 'database is locked'), tenta de novo
+        # sozinho, para uma ação líquida não sumir do ranking sem aviso.
+        if vf is None or vf != vf:
+            try:
+                vf = liquidez(baixar_historico(t, period="3mo"))
+            except Exception:
+                vf = None
+        if vf is not None and vf == vf and vf >= min_vol:
+            rows.append((t, vf))
 
     rows.sort(key=lambda x: -x[1])
     return rows[:top_n]
 
 
 # ==================== ANÁLISE POR ATIVO ====================
+def baixar_historico(ticker, tentativas=3, period="1y"):
+    """Baixa 1 ano de candles. O yfinance usa um cache em SQLite que às vezes dá
+    'database is locked' quando vários downloads rodam em paralelo; nesse caso ele
+    devolve vazio, então tentamos de novo com uma pequena pausa."""
+    df = pd.DataFrame()
+    for i in range(tentativas):
+        try:
+            df = yf.download(ticker, period=period, progress=False, auto_adjust=True, timeout=15)
+        except Exception:
+            df = pd.DataFrame()
+        if not df.empty:
+            return df
+        time.sleep(0.7 * (i + 1))
+    return df
+
+
 def process_ticker(ticker, left, right, min_vol, min_score, struct=None):
     struct = {**STRUCT_DEFAULT, **(struct or {})}
     skw = dict(n_pivots=struct["n_pivots"], tol=struct["tol"],
                min_move_atr=struct["min_move_atr"], exigir_topos=struct["exigir_topos"])
     try:
-        df = yf.download(ticker, period="1y", progress=False, auto_adjust=True)
+        df = baixar_historico(ticker)
         if df.empty or len(df) < 80:
             return None
 
@@ -447,7 +477,7 @@ ORDEM_ALERTA = {
 
 
 def run_scan(left=5, right=3, min_vol=8_000_000, min_score=6, top_n=30,
-             tickers=None, workers=10, progress_cb=None, struct=None):
+             tickers=None, workers=5, progress_cb=None, struct=None):
     """1) ranqueia por liquidez e fica só com os top_n mais líquidos;
     2) roda a análise de pivôs + estrutura nesses ativos.
     Retorna (DataFrame ordenado por força do alerta e score ou None, ranking)."""
