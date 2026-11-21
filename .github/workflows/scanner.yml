@@ -11,6 +11,7 @@ on:
 jobs:
   scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 15        # derruba sozinho se travar (o normal é 2 a 5 min)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,6 +20,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: python alert_job.py
+        timeout-minutes: 10
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
