@@ -24,7 +24,7 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 15        # derruba sozinho se travar (o normal é 2 a 5 min)
+    timeout-minutes: 25        # derruba sozinho se travar (com 100 ativos o normal é 3 a 8 min)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,7 +33,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: python alert_job.py
-        timeout-minutes: 10
+        timeout-minutes: 20
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -41,7 +41,7 @@ jobs:
           # Opcional: crie "Variables" em Settings > Secrets and variables > Actions para mudar sem editar o arquivo
           PERFIL: ${{ vars.PERFIL || 'Equilibrado' }}          # Conservador | Equilibrado | Agressivo
           TIPO_SINAL: ${{ vars.TIPO_SINAL || 'dois' }}         # dois | antecipado | confirmado
-          TOP_N: ${{ vars.TOP_N || '30' }}
+          TOP_N: ${{ vars.TOP_N || '0' }}                      # 0 = todos os ativos da lista
       - name: Salvar histórico de sinais
         if: always()
         run: |
