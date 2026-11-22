@@ -6,7 +6,7 @@ Alerta só o que é NOVO (cada sinal é avisado uma única vez, sem guardar esta
 Também registra os sinais novos em data/historico_sinais.csv e atualiza os resultados dos antigos.
 
 Variáveis de ambiente: TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
-Opcionais: TOP_N (30), MIN_VOL_MI (8), MIN_SCORE (7), LEFT (5), RIGHT (3),
+Opcionais: TOP_N (0 = todos os ativos da lista), MIN_VOL_MI (8), MIN_SCORE (7), LEFT (5), RIGHT (3),
            N_PIVOTS (2), TOL_PCT (0.3), MIN_MOVE_ATR (1.5), EXIGIR_TOPOS (1), EXIGIR_ESTRUTURA (1),
            USAR_V1 (1), USAR_V2 (1), PERFIL (Equilibrado), TIPO_SINAL (dois|antecipado|confirmado),
            HISTORICO (data/historico_sinais.csv), ENVIAR_TODOS (0)
@@ -16,11 +16,13 @@ import sys
 
 from scanner_core import (run_scan_full, send_telegram, build_alert_message, build_alert_message_v2)
 import historico
+from universo import carregar_universo, limite
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-TOP_N = int(os.environ.get("TOP_N", 30))
+UNIVERSO = carregar_universo()
+TOP_N = limite(os.environ.get("TOP_N", 0), UNIVERSO)   # 0 = todos os ativos da lista
 MIN_VOL = float(os.environ.get("MIN_VOL_MI", 8)) * 1_000_000
 MIN_SCORE = int(os.environ.get("MIN_SCORE", 7))
 ENVIAR_TODOS = os.environ.get("ENVIAR_TODOS", "0") == "1"   # 1 = envia todos os sinais atuais
@@ -52,9 +54,14 @@ def enviar_em_lotes(rows, montar, titulo, tamanho):
 
 def main():
     out = run_scan_full(left=LEFT, right=RIGHT, min_vol=MIN_VOL, min_score=MIN_SCORE, top_n=TOP_N,
-                        struct=STRUCT, perfil=PERFIL, tipo=TIPO, usar_v2=USAR_V2)
+                        tickers=UNIVERSO, struct=STRUCT, perfil=PERFIL, tipo=TIPO, usar_v2=USAR_V2)
     print(f"Universo líquido analisado: {len(out['ranking'])} ativos | IBOV: "
           f"{'ok' if out.get('ibov_ok') else 'indisponível (contexto de mercado neutro)'}")
+    analisados = {t for t, _ in out["ranking"]}
+    fora = [t.replace(".SA", "") for t in UNIVERSO if t not in analisados]
+    if fora:
+        print(f"Fora da análise ({len(fora)}): {', '.join(fora)} "
+              f"(sem dados no Yahoo, abaixo do volume mínimo ou cortados por TOP_N)")
     print(f"TELEGRAM_TOKEN definido: {bool(TOKEN.strip())} | "
           f"TELEGRAM_CHAT_ID definido: {bool(CHAT_ID.strip())}")
 

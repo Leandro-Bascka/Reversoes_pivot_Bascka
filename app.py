@@ -8,6 +8,9 @@ from plotly.subplots import make_subplots
 from scanner_core import (run_scan_full, send_telegram, build_alert_message,
                           build_alert_message_v2)
 import historico
+from universo import carregar_universo
+
+UNIVERSO = carregar_universo()
 
 st.set_page_config(
     page_title="B3 Pivot Scanner Pro",
@@ -81,8 +84,10 @@ st.caption("Pivôs + estrutura de fundos/topos + Bascka Reversal V2 (SMC, fluxo,
 
 with st.sidebar:
     st.header("Configurações")
-    top_n = st.slider("Analisar as N ações mais líquidas", 10, 80, 30, 5,
-                      help="A lista atual tem cerca de 58 ativos; acima disso, só entram os que existirem na lista.")
+    n_lista = len(UNIVERSO)
+    top_n = st.slider("Analisar as N ações mais líquidas", min(10, n_lista - 1), max(n_lista, 11), n_lista, 1,
+                      help=f"Sua lista tem {n_lista} ativos (scanner_core.py). Na ponta direita, analisa todos.")
+    st.caption(f"Lista: {n_lista} ativos · analisando os {top_n} mais líquidos")
     min_vol_mi = st.slider("Volume mínimo (R$ milhões)", 3.0, 25.0, 8.0, 1.0)
     enviar_telegram = st.checkbox("Enviar alertas no Telegram", value=True)
 
@@ -157,6 +162,7 @@ if st.button("🚀 Rodar Análise Completa", type="primary", width="stretch"):
     out = run_scan_full(
         left=left, right=right, min_vol=min_vol_mi * 1_000_000,
         min_score=min_score, top_n=top_n, progress_cb=cb, perfil=perfil, tipo=tipo, usar_v2=usar_v2,
+        tickers=UNIVERSO,
         struct={
             "n_pivots": n_pivots, "tol": tol_pct / 100, "min_move_atr": min_move_atr,
             "exigir_topos": exigir_topos, "exigir_estrutura": exigir_estrutura,
@@ -207,6 +213,13 @@ if out:
         with st.expander(f"💧 Universo analisado: {len(out['ranking'])} mais líquidas"):
             for i, (t, v) in enumerate(out["ranking"], 1):
                 st.write(f"{i}. **{t.replace('.SA', '')}**: R$ {v/1e6:,.1f} mi/dia")
+    analisados = {t for t, _ in out["ranking"]}
+    fora = [t.replace(".SA", "") for t in UNIVERSO if t not in analisados]
+    if fora:
+        with st.expander(f"⚠️ Fora da análise: {len(fora)} ativos"):
+            st.caption("Sem dados no Yahoo (ticker mudou ou saiu da bolsa), abaixo do volume mínimo "
+                       "ou cortados pela barra de quantidade.")
+            st.write(", ".join(fora))
 
     tab2, tab1, tab3 = st.tabs(["🎯 Reversal V2", "📌 Pivôs (original)", "📒 Histórico"])
 

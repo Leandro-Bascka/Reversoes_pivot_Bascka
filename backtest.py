@@ -9,7 +9,7 @@ entre o stop e aquele alvo.
 Saídas: backtest_out/backtest_resultados.csv (operação por operação), backtest_out/backtest_resumo.md
 e, no GitHub Actions, o resumo aparece na página do run. Opcionalmente manda o resumo ao Telegram.
 
-Variáveis de ambiente (opcionais): BT_PERIODO (5y), TOP_N (30), MIN_VOL_MI (8), BT_WARMUP (210),
+Variáveis de ambiente (opcionais): BT_PERIODO (5y), TOP_N (0 = todos), MIN_VOL_MI (8), BT_WARMUP (210),
 BT_WORKERS (3), BT_MAX_MIN (25), BT_CUSTO_PCT (0.15), BT_MIN_SCORE (40), BT_TELEGRAM (1),
 BT_OUT (backtest_out), TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 """
@@ -24,9 +24,11 @@ import pandas as pd
 import scanner_core as sc
 import historico as H
 from reversal_v2 import alinhar_mercado, V2_DEFAULT
+from universo import carregar_universo, limite
 
 PERIODO = os.environ.get("BT_PERIODO", "5y")
-TOP_N = int(os.environ.get("TOP_N", 30))
+UNIVERSO = carregar_universo()
+TOP_N = limite(os.environ.get("TOP_N", 0), UNIVERSO)   # 0 = todos os ativos da lista
 MIN_VOL = float(os.environ.get("MIN_VOL_MI", 8)) * 1_000_000
 WARMUP = int(os.environ.get("BT_WARMUP", 210))
 WORKERS = int(os.environ.get("BT_WORKERS", 3))
@@ -199,7 +201,7 @@ def main():
     deadline = t0 + MAX_MIN * 60
     p = {**V2_DEFAULT}
     struct = {**sc.STRUCT_DEFAULT}
-    ranking = sc.rank_by_liquidity(sc.TICKERS, top_n=TOP_N, min_vol=MIN_VOL)
+    ranking = sc.rank_by_liquidity(UNIVERSO, top_n=TOP_N, min_vol=MIN_VOL)
     if not ranking:
         print("Sem ranking de liquidez (falha de download).")
         sys.exit(1)
