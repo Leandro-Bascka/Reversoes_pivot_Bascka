@@ -10,8 +10,8 @@ on:
         description: "Período do histórico (ex.: 2y, 5y)"
         default: "5y"
       top_n:
-        description: "Quantos ativos mais líquidos testar"
-        default: "30"
+        description: "Quantos ativos mais líquidos testar (0 = todos os da lista)"
+        default: "0"
 
 jobs:
   backtest:
