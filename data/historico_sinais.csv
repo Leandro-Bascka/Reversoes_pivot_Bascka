@@ -1,0 +1,2 @@
+id,ticker,direcao,modo,classe,score,data_sinal,entrada,stop,alvo1,alvo2,alvo3,risco_pct,status,data_resultado,r_alvo1,r_alvo2,r_alvo3
+AXIA3|Venda|Confirmada|2026-11-19,AXIA3,Venda,Confirmada,Reversão em formação,67,2026-11-19,46.0,50.29,39.56,37.41,33.12,9.33,aberto,,,,
