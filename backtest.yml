@@ -1,0 +1,39 @@
+# Salvar em: .github/workflows/backtest.yml
+# Backtest walk-forward da Bascka Reversal V2. Só roda quando você dispara (Actions > Backtest > Run workflow).
+# O resultado aparece no "Summary" da execução e como arquivo para baixar (Artifacts).
+name: Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      periodo:
+        description: "Período do histórico (ex.: 2y, 5y)"
+        default: "5y"
+      top_n:
+        description: "Quantos ativos mais líquidos testar"
+        default: "30"
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python backtest.py
+        timeout-minutes: 35
+        env:
+          BT_PERIODO: ${{ inputs.periodo }}
+          TOP_N: ${{ inputs.top_n }}
+          BT_MAX_MIN: "28"
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backtest
+          path: backtest_out/

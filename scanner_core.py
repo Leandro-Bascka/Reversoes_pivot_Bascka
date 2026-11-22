@@ -2,6 +2,8 @@
 Usada pelo app (app.py) e pelo job automático de alertas (alert_job.py)."""
 import time
 import yfinance as yf
+from reversal_v2 import (adicionar_indicadores_v2, alinhar_mercado, avaliar, passa_filtro,
+                         tendencia_semanal, V2_DEFAULT)
 import pandas as pd
 import numpy as np
 import requests
@@ -230,7 +232,8 @@ def analyze_structure(df, direction="up", n_pivots=2, tol=0.003,
                     etapa, barras = 2, n - 1 - l0
                 nivel_real = float(nivel) if direction == "up" else float(-nivel)
                 return {"etapa": etapa, "nivel": round(nivel_real, 2),
-                        "barras": int(barras), "perna_atr": perna}
+                        "barras": int(barras), "perna_atr": perna,
+                        "l0": int(l0), "l1": int(l1)}
 
     # ---------- Etapa 1: novo fundo mais baixo com divergência ----------
     if divergence and len(pl) >= n_pivots:
@@ -241,7 +244,8 @@ def analyze_structure(df, direction="up", n_pivots=2, tol=0.003,
         if descendentes and not invalido:
             ok, perna = tendencia_anterior_ok(l0)
             if ok:
-                return {"etapa": 1, "nivel": None, "barras": int(n - 1 - l0), "perna_atr": perna}
+                return {"etapa": 1, "nivel": None, "barras": int(n - 1 - l0), "perna_atr": perna,
+                        "l0": int(l0), "l1": int(seq[-2])}
 
     return res
 
@@ -306,7 +310,7 @@ def rank_by_liquidity(tickers, top_n=30, min_vol=0.0):
 
 
 # ==================== ANÁLISE POR ATIVO ====================
-def baixar_historico(ticker, tentativas=3, period="1y"):
+def baixar_historico(ticker, tentativas=3, period="2y"):
     """Baixa 1 ano de candles. O yfinance usa um cache em SQLite que às vezes dá
     'database is locked' quando vários downloads rodam em paralelo; nesse caso ele
     devolve vazio, então tentamos de novo com uma pequena pausa."""
@@ -322,7 +326,9 @@ def baixar_historico(ticker, tentativas=3, period="1y"):
     return df
 
 
-def process_ticker(ticker, left, right, min_vol, min_score, struct=None):
+def process_ticker(ticker, left, right, min_vol, min_score, struct=None, coletor=None):
+    """Lógica original (pivôs + estrutura). Se 'coletor' (dict) for passado, devolve nele o
+    DataFrame já com todos os indicadores, para a camada V2 reaproveitar sem baixar de novo."""
     struct = {**STRUCT_DEFAULT, **(struct or {})}
     skw = dict(n_pivots=struct["n_pivots"], tol=struct["tol"],
                min_move_atr=struct["min_move_atr"], exigir_topos=struct["exigir_topos"])
@@ -344,6 +350,10 @@ def process_ticker(ticker, left, right, min_vol, min_score, struct=None):
         df["EMA20"] = df["Close"].ewm(span=20).mean()
         df["EMA50"] = df["Close"].ewm(span=50).mean()
         df["Vol_MA"] = df["Volume"].rolling(20).mean()
+        adicionar_indicadores_v2(df)          # colunas extras da V2 (não afetam a lógica original)
+        if coletor is not None:
+            coletor["df"] = df
+            coletor["vol_fin"] = float(vol_fin)
 
         last_ph = df[df["PH"]].tail(1)
         last_pl = df[df["PL"]].tail(1)
@@ -510,3 +520,169 @@ def run_scan(left=5, right=3, min_vol=8_000_000, min_score=6, top_n=30,
     df["ordem"] = df["Alerta"].map(ORDEM_ALERTA)
     df = df.sort_values(["ordem", "Score", "Liq Rank"], ascending=[True, False, True]).reset_index(drop=True)
     return df, ranking
+
+
+# ==================== CAMADA V2 (Bascka Reversal) ====================
+def avaliar_em(df, t, direction, struct=None, p=None, mercado=None):
+    """Avalia a reversão como ela seria vista no fechamento da barra t (sem olhar o futuro).
+    Os pivôs só valem depois de 'right' barras, então os mais recentes são mascarados."""
+    struct = {**STRUCT_DEFAULT, **(struct or {})}
+    p = {**V2_DEFAULT, **(p or {})}
+    d = df.iloc[:t + 1].copy()
+    ok = np.arange(t + 1) <= (t - p["right"])
+    d["PL"] = d["PL"].values & ok
+    d["PH"] = d["PH"].values & ok
+    bull, bear = find_divergences(d)
+    est = analyze_structure(d, direction, divergence=(bull if direction == "up" else bear),
+                            n_pivots=struct["n_pivots"], tol=struct["tol"],
+                            min_move_atr=struct["min_move_atr"], exigir_topos=struct["exigir_topos"])
+    return avaliar(d, direction, est, p, mercado, tendencia_semanal(d))
+
+
+def baixar_ibov(period="2y"):
+    try:
+        d = baixar_historico("^BVSP", period=period)
+        if d is None or d.empty:
+            return None
+        if isinstance(d.columns, pd.MultiIndex):
+            d.columns = d.columns.get_level_values(0)
+        return d[["Close"]]
+    except Exception:
+        return None
+
+
+def _linha_v2(ticker, df, vol_fin, res):
+    al = res["alvos"]
+    return {
+        "Ticker": ticker.replace(".SA", ""),
+        "Direção": res["direcao"],
+        "Classe": res["classe"],
+        "Score V2": res["score"],
+        "Modo": res["modo"],
+        "Modos": " + ".join(res["modos"]) if res["modos"] else "—",
+        "Etapa": res["etapa"],
+        "Estágio": ESTAGIOS[res["etapa"]],
+        "Semanal": f"{res['semanal']} ({res['alinhamento']})",
+        "Entrada": res["entrada"], "Stop": res["stop"],
+        "Alvo 1": al[0], "Alvo 2": al[1], "Alvo 3": al[2],
+        "Stop %": res["risco_pct"], "R/R estrutural": res["rr_estrutural"],
+        "Vol Rel": res["vol_rel"], "Nível": res["nivel"],
+        "Data pivô": res["data_pivo"].strftime("%Y-%m-%d"),
+        "Confirmado em": res["data_confirmacao"].strftime("%Y-%m-%d"),
+        "Sinal desde": res["sinal_desde"].strftime("%Y-%m-%d"),
+        "Novo": bool(res.get("novo")),
+        "Evidências": "; ".join(res["evidencias"]),
+        "Grupos": res["grupos"],
+        "Volume Médio": round(vol_fin),
+        "_df": df,
+        "_tipo": "low" if res["direcao"] == "Compra" else "high",
+        "_res": res,
+    }
+
+
+def analisar_v2(ticker, df, vol_fin, left, right, struct, p, ibov, perfil, tipo):
+    mercado = alinhar_mercado(ibov, df.index)
+    t = len(df) - 1
+    rows = []
+    for direction in ("up", "down"):
+        res = avaliar_em(df, t, direction, struct, p, mercado)
+        if res is None:
+            continue
+        ontem = avaliar_em(df, t - 1, direction, struct, p, mercado)
+        novos = [m for m in res["modos"] if not (ontem and m in ontem["modos"])]
+        res["novo"] = bool(novos)
+        res["modos_novos"] = novos
+        if passa_filtro(res, perfil, tipo):
+            rows.append(_linha_v2(ticker, df, vol_fin, res))
+    return rows
+
+
+def process_ticker_full(ticker, left, right, min_vol, min_score, struct, p, ibov,
+                        perfil="Equilibrado", tipo="dois", usar_v2=True):
+    """Uma única baixada por ativo: devolve (linhas_v1, linhas_v2, df)."""
+    col = {}
+    v1 = process_ticker(ticker, left, right, min_vol, min_score, struct, coletor=col)
+    v2 = []
+    if usar_v2 and "df" in col:
+        try:
+            v2 = analisar_v2(ticker, col["df"], col["vol_fin"], left, right, struct, p, ibov, perfil, tipo)
+        except Exception as e:
+            print(f"V2 falhou em {ticker}: {type(e).__name__}: {e}")
+    return v1, v2, col.get("df")
+
+
+def run_scan_full(left=5, right=3, min_vol=8_000_000, min_score=6, top_n=30, tickers=None,
+                  workers=5, progress_cb=None, struct=None, perfil="Equilibrado",
+                  tipo="dois", usar_v2=True):
+    """Varredura completa: lógica original + camada V2 numa única passada.
+    Retorna dict: v1 (DataFrame|None), v2 (DataFrame|None), ranking, dfs {ticker: DataFrame}."""
+    struct = {**STRUCT_DEFAULT, **(struct or {})}
+    tickers = tickers or TICKERS
+    ranking = rank_by_liquidity(tickers, top_n=top_n, min_vol=min_vol)
+    out = {"v1": None, "v2": None, "ranking": ranking, "dfs": {}}
+    if not ranking:
+        return out
+
+    p = {**V2_DEFAULT, "left": left, "right": right, "min_move_atr": struct["min_move_atr"]}
+    ibov = baixar_ibov() if usar_v2 else None
+    out["ibov_ok"] = ibov is not None
+    liq_rank = {t.replace(".SA", ""): i + 1 for i, (t, _) in enumerate(ranking)}
+    alvo = [t for t, _ in ranking]
+
+    r1, r2 = [], []
+    total = len(alvo)
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(process_ticker_full, t, left, right, min_vol, min_score, struct, p,
+                          ibov, perfil, tipo, usar_v2): t for t in alvo}
+        for i, fut in enumerate(as_completed(futs)):
+            v1, v2, d = fut.result()
+            if v1:
+                r1.extend(v1)
+            if v2:
+                r2.extend(v2)
+            if d is not None:
+                out["dfs"][futs[fut]] = d
+            if progress_cb:
+                progress_cb(i + 1, total, len(r1) + len(r2))
+
+    for r in r1 + r2:
+        r["Liq Rank"] = liq_rank.get(r["Ticker"], 999)
+    if r1:
+        d1 = pd.DataFrame(r1)
+        d1["ordem"] = d1["Alerta"].map(ORDEM_ALERTA)
+        out["v1"] = d1.sort_values(["ordem", "Score", "Liq Rank"],
+                                   ascending=[True, False, True]).reset_index(drop=True)
+    if r2:
+        out["v2"] = pd.DataFrame(r2).sort_values(["Score V2", "Liq Rank"],
+                                                 ascending=[False, True]).reset_index(drop=True)
+    return out
+
+
+def build_alert_message_v2(rows, titulo="Bascka Reversal V2"):
+    import html
+    msg = f"<b>🎯 {titulo}</b>\n{datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+    for r in rows:
+        seta = "🟢" if r["Direção"] == "Compra" else "🔴"
+        msg += f"{seta} <b>{r['Ticker']}</b> · {r['Direção']} · {r['Modo']}\n"
+        msg += f"{r['Classe']} | Score {r['Score V2']}/100 | Liquidez #{r['Liq Rank']}\n"
+        msg += (f"Entrada R$ {r['Entrada']} | Stop R$ {r['Stop']} ({r['Stop %']}%)\n"
+                f"Alvos: R$ {r['Alvo 1']} (1,5R) · {r['Alvo 2']} (2R) · {r['Alvo 3']} (3R)\n")
+        msg += f"Semanal: {r['Semanal']} | R/R até o topo: {r['R/R estrutural']}\n"
+        evid = [e for e in r["Evidências"].split("; ") if e][:4]
+        if evid:
+            msg += "• " + html.escape("\n• ".join(evid)) + "\n"
+        msg += "\n"
+    return msg
+
+
+def preparar_indicadores(df, left=5, right=3):
+    """Mesmos indicadores que o scanner calcula por ativo (usado pelo backtest)."""
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    df = detect_pivots(df.copy(), left=left, right=right)
+    df["RSI"] = calculate_rsi(df["Close"])
+    df["ATR"] = calculate_atr(df)
+    df["EMA20"] = df["Close"].ewm(span=20).mean()
+    df["EMA50"] = df["Close"].ewm(span=50).mean()
+    df["Vol_MA"] = df["Volume"].rolling(20).mean()
+    return adicionar_indicadores_v2(df)
