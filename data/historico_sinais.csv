@@ -1,3 +1,6 @@
 id,ticker,direcao,modo,classe,score,data_sinal,entrada,stop,alvo1,alvo2,alvo3,risco_pct,status,data_resultado,r_alvo1,r_alvo2,r_alvo3
 AXIA3|Venda|Confirmada|2026-11-19,AXIA3,Venda,Confirmada,Reversão em formação,67,2026-11-19,46.0,50.29,39.56,37.41,33.12,9.33,aberto,,,,
 SMTO3|Venda|Confirmada|2026-11-19,SMTO3,Venda,Confirmada,Reversão em formação,70,2026-11-19,17.65,21.83,11.38,9.29,5.12,23.67,aberto,,,,
+SMTO3|Venda|Reteste|2026-11-24,SMTO3,Venda,Reteste,Reversão em formação,73,2026-11-24,16.26,21.79,7.97,5.2,-0.33,34.0,aberto,,,,
+PSSA3|Venda|Confirmada|2026-11-24,PSSA3,Venda,Confirmada,Reversão em formação,69,2026-11-24,41.93,47.68,33.31,30.44,24.69,13.71,aberto,,,,
+AXIA3|Venda|Reteste|2026-11-24,AXIA3,Venda,Reteste,Reversão em formação,63,2026-11-24,45.71,50.28,38.85,36.56,31.98,10.01,aberto,,,,
